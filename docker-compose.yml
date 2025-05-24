@@ -1,0 +1,68 @@
+version: "3.9"
+
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.56
+    container_name: jaeger
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "6831:6831/udp" # Jaeger agent
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+
+  user-service:
+    build:
+      context: ./services/user
+    container_name: user-service
+    ports:
+      - "8001:8001"
+    environment:
+      - JAEGER_AGENT_HOST=jaeger
+      - JAEGER_AGENT_PORT=6831
+
+  orders-service:
+    build:
+      context: ./services/orders
+    container_name: orders-service
+    ports:
+      - "8002:8002"
+    environment:
+      - JAEGER_AGENT_HOST=jaeger
+      - JAEGER_AGENT_PORT=6831
+    depends_on:
+      - user-service
+
+  payments-service:
+    build:
+      context: ./services/payments
+    container_name: payments-service
+    ports:
+      - "8003:8003"
+    environment:
+      - JAEGER_AGENT_HOST=jaeger
+      - JAEGER_AGENT_PORT=6831
+    depends_on:
+      - orders-service
+      - user-service
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+              - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+              - "9090:9090"
+    depends_on:
+                 - user-service
+                 - orders-service
+                 - payments-service
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+

@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+requests
+opentelemetry-sdk
+opentelemetry-api
+opentelemetry-exporter-jaeger
+opentelemetry-instrumentation-fastapi
+opentelemetry-exporter-prometheus
+prometheus_client
+opentelemetry-instrumentation-requests
