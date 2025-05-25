@@ -1,12 +1,22 @@
 version: "3.9"
 
 services:
+  postgres:
+    image: postgres:14
+    container_name: user-db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: users_db
+    ports:
+      - "5432:5432"
+
   jaeger:
     image: jaegertracing/all-in-one:1.56
     container_name: jaeger
     ports:
-      - "16686:16686"  # Jaeger UI
-      - "6831:6831/udp" # Jaeger agent
+      - "16686:16686"
+      - "6831:6831/udp"
     environment:
       - COLLECTOR_ZIPKIN_HOST_PORT=:9411
 
@@ -16,9 +26,12 @@ services:
     container_name: user-service
     ports:
       - "8001:8001"
+    depends_on:
+      - postgres
     environment:
       - JAEGER_AGENT_HOST=jaeger
       - JAEGER_AGENT_PORT=6831
+      - DATABASE_URL=postgresql://user:pass@postgres:5432/users_db
 
   orders-service:
     build:
@@ -26,11 +39,13 @@ services:
     container_name: orders-service
     ports:
       - "8002:8002"
+    depends_on:
+      - user-service
+      - postgres
     environment:
       - JAEGER_AGENT_HOST=jaeger
       - JAEGER_AGENT_PORT=6831
-    depends_on:
-      - user-service
+      - DATABASE_URL=postgresql://user:pass@postgres:5432/users_db
 
   payments-service:
     build:
@@ -38,24 +53,25 @@ services:
     container_name: payments-service
     ports:
       - "8003:8003"
-    environment:
-      - JAEGER_AGENT_HOST=jaeger
-      - JAEGER_AGENT_PORT=6831
     depends_on:
       - orders-service
       - user-service
+    environment:
+      - JAEGER_AGENT_HOST=jaeger
+      - JAEGER_AGENT_PORT=6831
+      - DATABASE_URL=postgresql://user:pass@postgres:5432/users_db
 
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
     volumes:
-              - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
-              - "9090:9090"
+      - "9090:9090"
     depends_on:
-                 - user-service
-                 - orders-service
-                 - payments-service
+      - user-service
+      - orders-service
+      - payments-service
 
   grafana:
     image: grafana/grafana:latest
@@ -64,5 +80,3 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
-
-

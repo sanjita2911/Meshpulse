@@ -1,10 +1,13 @@
 fastapi
 uvicorn
 requests
-opentelemetry-sdk
+sqlalchemy
+psycopg2-binary
+
 opentelemetry-api
+opentelemetry-sdk
 opentelemetry-exporter-jaeger
 opentelemetry-instrumentation-fastapi
+opentelemetry-instrumentation-requests
 opentelemetry-exporter-prometheus
 prometheus_client
-opentelemetry-instrumentation-requests

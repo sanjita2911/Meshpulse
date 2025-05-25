@@ -8,3 +8,5 @@ opentelemetry-instrumentation-fastapi
 opentelemetry-exporter-prometheus
 prometheus_client
 opentelemetry-instrumentation-requests
+psycopg2-binary
+sqlalchemy

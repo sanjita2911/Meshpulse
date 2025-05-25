@@ -12,6 +12,33 @@ from opentelemetry.exporter.prometheus import PrometheusMetricReader
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
 
+from sqlalchemy import create_engine, Column, String, Float, DateTime
+from sqlalchemy.orm import declarative_base, Session
+from datetime import datetime
+from pydantic import BaseModel
+import os
+
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@postgres:5432/users_db")
+engine = create_engine(DATABASE_URL)
+Base = declarative_base()
+
+class Payment(Base):
+    __tablename__ = "payments"
+    id = Column(String, primary_key=True)
+    order_id = Column(String)
+    user_id = Column(String)
+    amount = Column(Float)
+    status = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+Base.metadata.create_all(engine)
+
+class PaymentIn(BaseModel):
+    id: str
+    order_id: str
+    user_id: str
+    amount: float
+
 # First, we set up the tracing
 
 trace.set_tracer_provider(
@@ -34,35 +61,85 @@ app = FastAPI()
 FastAPIInstrumentor.instrument_app(app)
 RequestsInstrumentor().instrument()
 
-@app.get("/payments/{user_id}")
-async def get_payment(user_id: str, request: Request):
+@app.post("/payments")
+async def create_payment(payment: PaymentIn, request: Request):
     start = time.time()
-    try:
-        # Call Orders service to get user and orders info
-        resp = requests.get(f"http://orders-service:8002/orders/{user_id}", timeout=2)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception:
-        err_ctr.add(1, {"route": "/payments/{user_id}"})
-        raise Exception("Failed to fetch orders info")
+    tracer = trace.get_tracer(__name__)
 
-    # Simulate random failure (5% chance)
-    if random.random() < 0.05:
-        err_ctr.add(1, {"route": "/payments/{user_id}"})
-        raise Exception("Simulated payment lookup failure")
+    with tracer.start_as_current_span("create_payment") as span:
+        # Step 1: Validate order via orders-service
+        try:
+            resp = requests.get(f"http://orders-service:8002/orders/{payment.user_id}", timeout=2)
+            resp.raise_for_status()
+        except Exception as e:
+            span.set_attribute("order_validation_failed", True)
+            err_ctr.add(1, {"route": "/payments"})
+            raise Exception("Failed to validate order") from e
 
-    # Simulate payment lookup latency
-    time.sleep(0.09)
+        # Step 2: Simulate processing
+        time.sleep(0.1)
+        status = "Success" if random.random() > 0.05 else "Failed"
 
-    duration = (time.time() - start) * 1000
-    hist.record(duration, {"route": "/payments/{user_id}"})
+        # Step 3: Record in DB
+        with Session(engine) as session:
+            new_payment = Payment(
+                id=payment.id,
+                order_id=payment.order_id,
+                user_id=payment.user_id,
+                amount=payment.amount,
+                status=status
+            )
+            session.add(new_payment)
+            session.commit()
 
-    # Return combined result
-    return {
-        "user": data["user"],
-        "orders": data["orders"],
-        "payment": {"payment_id": 1, "status": "Success"}
-    }
+        hist.record((time.time() - start) * 1000, {"route": "/payments"})
+        return {"message": "Processed", "status": status, "payment_id": payment.id}
+    
+@app.get("/payments/{user_id}")
+async def get_payments(user_id: str, request: Request):
+    start = time.time()
+    tracer = trace.get_tracer(__name__)
+    
+    with tracer.start_as_current_span("get_payments_by_user") as span:
+        with Session(engine) as session:
+            payments = session.query(Payment).filter(Payment.user_id == user_id).all()
+            result = [
+                {
+                    "payment_id": p.id,
+                    "order_id": p.order_id,
+                    "amount": p.amount,
+                    "status": p.status,
+                    "created_at": p.created_at.isoformat()
+                } for p in payments
+            ]
+        
+        hist.record((time.time() - start) * 1000, {"route": "/payments/{user_id}"})
+        return {"user_id": user_id, "payments": result}
+
+@app.get("/payments/status/{order_id}")
+async def get_payment_status(order_id: str, request: Request):
+    start = time.time()
+    tracer = trace.get_tracer(__name__)
+
+    with tracer.start_as_current_span("get_payment_status") as span:
+        with Session(engine) as session:
+            payment = session.query(Payment).filter(Payment.order_id == order_id).first()
+
+        hist.record((time.time() - start) * 1000, {"route": "/payments/status/{order_id}"})
+
+        if payment:
+            return {
+                "order_id": order_id,
+                "status": payment.status,
+                "payment_id": payment.id,
+                "amount": payment.amount
+            }
+        else:
+            return {
+                "order_id": order_id,
+                "status": "Not Paid"
+            }
+    
 
 # Expose /metrics endpoint for Prometheus scraping
 metrics_app = make_asgi_app()
