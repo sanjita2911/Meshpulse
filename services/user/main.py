@@ -1,5 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
-import time, random, os
+import time
+import random
+import os
 from prometheus_client import make_asgi_app
 from pydantic import BaseModel
 
@@ -17,9 +19,11 @@ from sqlalchemy import create_engine, Column, String
 from sqlalchemy.orm import declarative_base, Session
 
 # Database configuration
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/users_db")
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", "postgresql://user:pass@localhost:5432/users_db")
 engine = create_engine(DATABASE_URL)
 Base = declarative_base()
+
 
 class User(Base):
     __tablename__ = "users"
@@ -29,9 +33,12 @@ class User(Base):
     dob = Column(String)
     address = Column(String)
 
+
 Base.metadata.create_all(engine)
 
 # Pydantic model for input validation
+
+
 class UserIn(BaseModel):
     id: str
     name: str
@@ -39,16 +46,19 @@ class UserIn(BaseModel):
     dob: str
     address: str
 
+
 # Tracing setup
 trace.set_tracer_provider(
     TracerProvider(resource=Resource.create({SERVICE_NAME: "user-service"}))
 )
 jaeger_exporter = JaegerExporter(agent_host_name="jaeger", agent_port=6831)
-trace.get_tracer_provider().add_span_processor(BatchSpanProcessor(jaeger_exporter))
+trace.get_tracer_provider().add_span_processor(
+    BatchSpanProcessor(jaeger_exporter))
 tracer = trace.get_tracer(__name__)
 
 # Metrics setup
-metrics.set_meter_provider(MeterProvider(metric_readers=[PrometheusMetricReader()]))
+metrics.set_meter_provider(MeterProvider(
+    metric_readers=[PrometheusMetricReader()]))
 meter = metrics.get_meter(__name__)
 hist = meter.create_histogram("http.server.duration", unit="ms")
 err_ctr = meter.create_counter("http.server.errors")
@@ -58,25 +68,30 @@ app = FastAPI()
 FastAPIInstrumentor.instrument_app(app)
 RequestsInstrumentor().instrument()
 
+
 @app.post("/users")
 async def create_user(user: UserIn):
     with tracer.start_as_current_span("create_user") as span:
+        time.sleep(0.05)
         span.set_attribute("user.id", user.id)
         span.set_attribute("user.email", user.email)
         with Session(engine) as session:
             existing = session.get(User, user.id)
             if existing:
                 span.set_attribute("user.exists", True)
-                raise HTTPException(status_code=400, detail="User already exists")
+                raise HTTPException(
+                    status_code=400, detail="User already exists")
             new_user = User(**user.dict())
             session.add(new_user)
             session.commit()
             return {"status": "created"}
 
+
 @app.get("/users/{user_id}")
 async def get_user(user_id: str, request: Request):
     start = time.time()
     with tracer.start_as_current_span("get_user_lookup") as span:
+        time.sleep(0.05)
         span.set_attribute("user.id", user_id)
         with Session(engine) as session:
             user = session.get(User, user_id)
